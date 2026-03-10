@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plant_tray_viability"
+version = "0.1.0"
+description = "Computer vision pipeline for greenhouse tray analysis"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["src"]
