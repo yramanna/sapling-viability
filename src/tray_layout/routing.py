@@ -9,7 +9,7 @@ class RoutingDecision:
     reason: str
 
 
-def choose_layout_route(confidence: float, threshold: float = 0.90) -> RoutingDecision:
+def choose_layout_route(confidence: float, threshold: float = 1.0) -> RoutingDecision:
     if confidence >= threshold:
         return RoutingDecision(
             use_classifier_layout=True,

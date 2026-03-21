@@ -4,8 +4,11 @@ pandas
 pillow
 scikit-learn
 matplotlib
+scipy
 torch
 torchvision
+timm
 ultralytics
 pyyaml
 tqdm
+pytest
