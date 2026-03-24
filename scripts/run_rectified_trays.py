@@ -40,9 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable debug image outputs.",
     )
     parser.add_argument(
-        "--no-obliquity-correction",
+        "--obliquity-correction",
         action="store_true",
-        help="Disable residual tilt correction before grid inference.",
+        help="Enable residual tilt correction before grid inference.",
     )
     return parser
 
@@ -57,7 +57,7 @@ def main() -> None:
         crop_pad=args.crop_pad,
         crop_min_size=args.crop_min_size,
         save_debug=not args.no_debug,
-        apply_obliquity_correction=not args.no_obliquity_correction,
+        apply_obliquity_correction=args.obliquity_correction,
     )
 
     print(f"Processed {len(results)} rectified tray image(s)")

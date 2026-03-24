@@ -12,3 +12,6 @@ ultralytics
 pyyaml
 tqdm
 pytest
+fastapi
+uvicorn
+python-multipart

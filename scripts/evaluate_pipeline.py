@@ -15,6 +15,7 @@ from ultralytics import YOLO
 
 from src.germination import load_validity_model, predict_validity_for_tray, summarize_tray_validity
 from src.pipeline.run_full_pipeline import run_full_pipeline
+from src.utils.visualization import render_validity_overlay
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
@@ -67,7 +68,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tray-type-threshold",
         type=float,
-        default=0.95,
+        default=0.90,
         help="Confidence threshold for trusting tray-type classifier output.",
     )
     parser.add_argument(
@@ -82,9 +83,14 @@ def parse_args() -> argparse.Namespace:
         help="Save notebook-3 fallback debug outputs.",
     )
     parser.add_argument(
-        "--no-obliquity",
+        "--obliquity-correction",
         action="store_true",
-        help="Disable obliquity correction before fallback CV grid inference.",
+        help="Enable obliquity correction before fallback CV grid inference.",
+    )
+    parser.add_argument(
+        "--no-annotated-output",
+        action="store_true",
+        help="Skip saving annotated tray images with per-cell labels and tray stats.",
     )
     return parser.parse_args()
 
@@ -134,6 +140,7 @@ def build_result_row(
         "image": Path(result.image_path).name if result.image_path else "",
         "pred_rows": predicted_rows,
         "pred_cols": predicted_cols,
+        "annotated_image_path": result.annotated_image_path,
         "tray_type_key": "" if result.tray_type_key is None else "x".join(str(v) for v in result.tray_type_key),
         "tray_type_confidence": result.tray_type_confidence,
         "route": None if result.routing is None else (
@@ -208,6 +215,37 @@ def write_csv(rows: list[dict[str, object]], path: Path) -> None:
         writer.writerows(rows)
 
 
+def save_annotated_result(output_dir: Path, result) -> str | None:
+    if result.warped_bgr is None or result.rows is None or result.cols is None:
+        return None
+
+    annotated_dir = output_dir / "annotated"
+    annotated_dir.mkdir(parents=True, exist_ok=True)
+
+    grid_x = None
+    grid_y = None
+    if result.fallback_result is not None:
+        grid_x = result.fallback_result.grid_x
+        grid_y = result.fallback_result.grid_y
+
+    annotated_bgr = render_validity_overlay(
+        warped_bgr=result.warped_bgr,
+        predictions=result.cell_predictions or [],
+        tray_stats=result.tray_stats,
+        rows=int(result.rows),
+        cols=int(result.cols),
+        grid_x=grid_x,
+        grid_y=grid_y,
+    )
+
+    image_stem = Path(result.image_path).stem if result.image_path else "tray"
+    annotated_path = annotated_dir / f"{image_stem}.annotated.jpg"
+    import cv2
+
+    cv2.imwrite(str(annotated_path), annotated_bgr)
+    return str(annotated_path)
+
+
 def main() -> None:
     args = parse_args()
     input_dir = Path(args.input_dir)
@@ -236,7 +274,7 @@ def main() -> None:
             tray_type_threshold=args.tray_type_threshold,
             rectified_width=args.rectified_width,
             save_debug=args.save_debug,
-            apply_obliquity_correction=not args.no_obliquity,
+            apply_obliquity_correction=args.obliquity_correction,
         )
 
         if result.crop_paths:
@@ -252,6 +290,8 @@ def main() -> None:
 
         result.cell_predictions = cell_predictions
         result.tray_stats = tray_stats
+        if not args.no_annotated_output:
+            result.annotated_image_path = save_annotated_result(output_dir, result)
 
         truth = truth_map.get(image_path.name)
         rows.append(build_result_row(result, truth, tray_stats=tray_stats))

@@ -32,6 +32,7 @@ class PipelineResult:
     crop_paths: list[str]
     cell_predictions: list[CellValidityPrediction] | None = None
     tray_stats: dict[str, float | int] | None = None
+    annotated_image_path: str | None = None
     fallback_result: WarpedTrayProcessingResult | None = None
 
 
@@ -81,7 +82,7 @@ def run_full_pipeline(
     crop_pad: int = 0,
     crop_min_size: int = 8,
     save_debug: bool = False,
-    apply_obliquity_correction: bool = True,
+    apply_obliquity_correction: bool = False,
 ) -> PipelineResult:
     image_path = str(image) if isinstance(image, (str, Path)) else ""
     if prefix is None:

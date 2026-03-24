@@ -1,0 +1,30 @@
+name: GreenhouseHelper
+options:
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.bloomlogic.greenhousehelper
+    SWIFT_VERSION: 5.0
+targets:
+  GreenhouseHelper:
+    type: application
+    platform: iOS
+    sources:
+      - path: .
+        excludes:
+          - README.md
+          - project.yml
+          - Assets.xcassets/README.md
+    resources:
+      - path: Assets.xcassets
+    info:
+      path: Supporting/Info.plist
+    settings:
+      base:
+        PRODUCT_NAME: Greenhouse Helper
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: true
+        INFOPLIST_KEY_UIRequiresFullScreen: true
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
