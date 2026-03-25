@@ -10,7 +10,13 @@ final class AnalysisViewModel: ObservableObject {
 
     private let apiClient = AnalysisAPIClient()
 
-    func analyze(image: UIImage, historyStore: HistoryStore) async -> AnalysisResult? {
+    func analyze(
+        image: UIImage,
+        historyStore: HistoryStore,
+        sessionID: String? = nil,
+        sessionName: String? = nil,
+        trayNumber: Int? = nil
+    ) async -> SavedAnalysis? {
         isProcessing = true
         errorMessage = nil
         defer { isProcessing = false }
@@ -18,8 +24,12 @@ final class AnalysisViewModel: ObservableObject {
         do {
             let result = try await apiClient.analyze(image: image)
             latestResult = result
-            await historyStore.save(result: result)
-            return result
+            return await historyStore.save(
+                result: result,
+                sessionID: sessionID,
+                sessionName: sessionName,
+                trayNumber: trayNumber
+            )
         } catch {
             if let localizedError = error as? LocalizedError,
                let description = localizedError.errorDescription,

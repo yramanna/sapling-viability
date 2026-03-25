@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class HistoryStore: ObservableObject {
     @Published private(set) var savedAnalyses: [SavedAnalysis] = []
+    @Published private(set) var savedSessions: [SavedSession] = []
 
     private let saveURL: URL = {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -18,16 +19,42 @@ final class HistoryStore: ObservableObject {
         load()
     }
 
-    func save(result: AnalysisResult) async {
+    func save(
+        result: AnalysisResult,
+        sessionID: String? = nil,
+        sessionName: String? = nil,
+        trayNumber: Int? = nil
+    ) async -> SavedAnalysis {
         let cachedImageFileName = await cacheAnnotatedImage(for: result)
         let saved = SavedAnalysis(
             id: result.analysisId,
             savedAt: Date(),
             result: result,
-            cachedAnnotatedImageFileName: cachedImageFileName
+            cachedAnnotatedImageFileName: cachedImageFileName,
+            sessionID: sessionID,
+            sessionName: sessionName,
+            trayNumber: trayNumber
         )
         savedAnalyses.insert(saved, at: 0)
         persist()
+        return saved
+    }
+
+    func setFlagged(_ flagged: Bool, for analysisID: String) {
+        guard let index = savedAnalyses.firstIndex(where: { $0.id == analysisID }) else { return }
+        savedAnalyses[index].isFlagged = flagged
+        persist()
+    }
+
+    func analyses(in sessionID: String) -> [SavedAnalysis] {
+        savedSessions.first(where: { $0.id == sessionID })?.analyses ?? []
+    }
+
+    func clearAll() {
+        savedAnalyses = []
+        try? FileManager.default.removeItem(at: saveURL)
+        try? FileManager.default.removeItem(at: imagesDirectoryURL)
+        rebuildSessions()
     }
 
     private func load() {
@@ -36,6 +63,7 @@ final class HistoryStore: ObservableObject {
         decoder.dateDecodingStrategy = .iso8601
         if let decoded = try? decoder.decode([SavedAnalysis].self, from: data) {
             savedAnalyses = decoded
+            rebuildSessions()
         }
     }
 
@@ -45,6 +73,29 @@ final class HistoryStore: ObservableObject {
         if let data = try? encoder.encode(savedAnalyses) {
             try? data.write(to: saveURL, options: .atomic)
         }
+        rebuildSessions()
+    }
+
+    private func rebuildSessions() {
+        let grouped = Dictionary(grouping: savedAnalyses) { saved -> String in
+            saved.sessionID ?? "single-\(saved.id)"
+        }
+
+        savedSessions = grouped.compactMap { key, analyses in
+            let sorted = analyses.sorted { lhs, rhs in lhs.savedAt > rhs.savedAt }
+            guard let newest = sorted.first,
+                  let oldest = sorted.last else { return nil }
+            let name = newest.sessionID == nil
+                ? newest.displayName
+                : newest.sessionDisplayName
+            return SavedSession(
+                id: key,
+                name: name,
+                startedAt: oldest.savedAt,
+                analyses: sorted
+            )
+        }
+        .sorted { lhs, rhs in lhs.startedAt > rhs.startedAt }
     }
 
     private func cacheAnnotatedImage(for result: AnalysisResult) async -> String? {

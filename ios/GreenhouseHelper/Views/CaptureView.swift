@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 private let captureFrameHorizontalInset: CGFloat = 22
-private let captureFrameTopInset: CGFloat = 104
+private let captureFrameTopInset: CGFloat = 116
 private let captureFrameBottomInset: CGFloat = 196
 private let captureFrameCornerRadius: CGFloat = 38
 
@@ -17,8 +17,13 @@ private func captureFrameRect(in size: CGSize) -> CGRect {
 }
 
 struct CaptureView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var image: UIImage?
+    let headerTitle: String
+    let headerSubtitle: String
+    let secondaryActionTitle: String?
+    let onCaptured: (UIImage) -> Void
+    let onClose: () -> Void
+    let onSecondaryAction: (() -> Void)?
+
     @StateObject private var camera = PremiumCameraController()
     @State private var shutterPressed = false
     @State private var guidesVisible = false
@@ -66,8 +71,7 @@ struct CaptureView: View {
         }
         .onChange(of: camera.capturedImage) { _, captured in
             guard let captured else { return }
-            image = captured
-            dismiss()
+            onCaptured(captured)
         }
     }
 
@@ -83,13 +87,13 @@ struct CaptureView: View {
                             .frame(width: 7, height: 7)
                             .shadow(color: AppPalette.lightGreen.opacity(0.7), radius: 6, x: 0, y: 0)
 
-                        Text("CAPTURE")
+                        Text(headerTitle)
                             .font(.system(size: 11, weight: .semibold, design: .default))
                             .tracking(1.6)
                             .foregroundStyle(AppPalette.lightGreen.opacity(0.96))
                     }
 
-                    Text("HOLD PARALLEL TO TRAY")
+                    Text(headerSubtitle)
                         .font(.system(size: 12, weight: .semibold, design: .default))
                         .tracking(1.2)
                         .foregroundStyle(AppPalette.white.opacity(0.78))
@@ -101,8 +105,22 @@ struct CaptureView: View {
             HStack {
                 Spacer()
 
+                if let secondaryActionTitle, let onSecondaryAction {
+                    Button(secondaryActionTitle) {
+                        onSecondaryAction()
+                    }
+                    .font(.system(size: 11, weight: .semibold, design: .default))
+                    .tracking(1.4)
+                    .foregroundStyle(AppPalette.white.opacity(0.92))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(AppPalette.black.opacity(0.28))
+                    .clipShape(Capsule())
+                    .padding(.trailing, 12)
+                }
+
                 Button {
-                    dismiss()
+                    onClose()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 17, weight: .bold))
@@ -114,7 +132,7 @@ struct CaptureView: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, 14)
+        .padding(.top, 8)
         .padding(.bottom, 18)
         .background(
             ZStack {
