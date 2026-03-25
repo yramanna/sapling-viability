@@ -46,6 +46,16 @@ final class HistoryStore: ObservableObject {
         persist()
     }
 
+    func deleteAnalysis(id analysisID: String) {
+        guard let index = savedAnalyses.firstIndex(where: { $0.id == analysisID }) else { return }
+        let removed = savedAnalyses.remove(at: index)
+        if let fileName = removed.cachedAnnotatedImageFileName {
+            let imageURL = imagesDirectoryURL.appendingPathComponent(fileName)
+            try? FileManager.default.removeItem(at: imageURL)
+        }
+        persist()
+    }
+
     func analyses(in sessionID: String) -> [SavedAnalysis] {
         savedSessions.first(where: { $0.id == sessionID })?.analyses ?? []
     }

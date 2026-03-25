@@ -6,7 +6,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from src.cell_extraction.grid_inference import crop_cells_from_grid
+from src.cell_extraction.grid_inference import (
+    _generate_positions,
+    crop_cells_from_grid,
+    infer_grid_from_separators_with_known_layout,
+)
 from src.cell_extraction.process_warped_tray import (
     DEFAULT_OUTPUT_DIR,
     DEFAULT_RECTIFIED_DIR,
@@ -136,7 +140,7 @@ def test_process_warped_tray_image_runs_on_synthetic_grid(tmp_path: Path) -> Non
     debug_overlay = tmp_path / "debug" / "synthetic_grid_overlay_final.jpg"
     assert debug_overlay.exists(), f"missing debug overlay: {debug_overlay}"
     corrected_warp = tmp_path / "debug" / "synthetic_warped_obliquity_corrected.jpg"
-    assert corrected_warp.exists(), f"missing corrected warp: {corrected_warp}"
+    assert not corrected_warp.exists()
 
 
 def test_result_to_dict_is_serializable(tmp_path: Path) -> None:
@@ -203,3 +207,35 @@ def test_process_warped_tray_directory_processes_rectified_images(tmp_path: Path
 def test_default_directory_constants_match_requested_layout() -> None:
     assert DEFAULT_RECTIFIED_DIR == Path("data/processed")
     assert DEFAULT_OUTPUT_DIR == Path("data/output")
+
+
+def test_generate_positions_uses_predicted_position_when_no_peak_exists() -> None:
+    positions = _generate_positions(
+        pitch=100,
+        limit=500,
+        proj_smooth=np.zeros(500, dtype=np.float32),
+        peaks=np.array([10, 110, 210]),
+        search_frac=0.2,
+        min_sep_frac=0.6,
+        nbins=32,
+        no_peak_placement="predicted",
+    )
+
+    assert positions[:3] == [10, 110, 210]
+    assert positions[3] > 280
+    assert positions[4] > 380
+
+
+def test_infer_grid_from_separators_with_known_layout_keeps_counts() -> None:
+    img = make_synthetic_grid_image(rows=4, cols=6)
+
+    result = infer_grid_from_separators_with_known_layout(
+        warped_bgr=img,
+        rows=4,
+        cols=6,
+    )
+
+    assert result.rows == 4
+    assert result.cols == 6
+    assert len(result.grid_x) == 7
+    assert len(result.grid_y) == 5

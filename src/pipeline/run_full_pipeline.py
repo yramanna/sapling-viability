@@ -5,11 +5,14 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import torch
 
-from src.cell_extraction.grid_inference import crop_cells_from_grid
+from src.cell_extraction.grid_inference import (
+    crop_cells_from_grid,
+    infer_grid_from_separators_with_known_layout,
+)
 from src.cell_extraction.process_warped_tray import (
     WarpedTrayProcessingResult,
-    process_warped_tray_image,
 )
 from src.germination.predict import CellValidityPrediction
 from src.rectification import predict_and_crop
@@ -36,24 +39,22 @@ class PipelineResult:
     fallback_result: WarpedTrayProcessingResult | None = None
 
 
-def _uniform_grid_lines(length: int, bins: int) -> list[int]:
-    if bins <= 0:
-        return [0, max(0, length - 1)]
-    return [int(round(v)) for v in np.linspace(0, max(0, length - 1), bins + 1)]
+@dataclass(frozen=True)
+class LoadedTrayTypeModel:
+    model: object
+    idx_to_key: list[tuple[int, int, int, int]]
+    device: str | torch.device = "cpu"
 
 
 def crop_cells_from_tray_type(
     warped_bgr: np.ndarray,
-    rows: int,
-    cols: int,
+    grid_x: list[int],
+    grid_y: list[int],
     out_dir: str | Path,
     prefix: str,
     crop_pad: int = 0,
     crop_min_size: int = 8,
 ) -> list[str]:
-    height, width = warped_bgr.shape[:2]
-    grid_x = _uniform_grid_lines(width, cols)
-    grid_y = _uniform_grid_lines(height, rows)
     saved = crop_cells_from_grid(
         warped_bgr,
         grid_x=grid_x,
@@ -69,8 +70,9 @@ def crop_cells_from_tray_type(
 def run_full_pipeline(
     image: np.ndarray | str | Path,
     yolo_model,
-    tray_type_checkpoint_path: str | Path,
     out_dir: str | Path,
+    tray_type_checkpoint_path: str | Path | None = None,
+    tray_type_model: LoadedTrayTypeModel | None = None,
     prefix: str | None = None,
     tray_type_threshold: float = 0.95,
     rectified_width: int = 1400,
@@ -112,44 +114,84 @@ def run_full_pipeline(
             fallback_result=None,
         )
 
-    model, idx_to_key, _ = load_tray_type_checkpoint(
-        tray_type_checkpoint_path,
-        device=tray_type_device,
-    )
+    if tray_type_model is None:
+        if tray_type_checkpoint_path is None:
+            raise ValueError("Either tray_type_checkpoint_path or tray_type_model must be provided.")
+        model, idx_to_key, _ = load_tray_type_checkpoint(
+            tray_type_checkpoint_path,
+            device=tray_type_device,
+        )
+        tray_type_model = LoadedTrayTypeModel(
+            model=model,
+            idx_to_key=idx_to_key,
+            device=tray_type_device,
+        )
+
     prediction = predict_tray_type(
-        model=model,
-        idx_to_key=idx_to_key,
+        model=tray_type_model.model,
+        idx_to_key=tray_type_model.idx_to_key,
         rectified_bgr=warped_bgr,
         input_size=tray_type_input_size,
-        device=tray_type_device,
+        device=tray_type_model.device,
     )
     routing = choose_layout_route(prediction.confidence, threshold=tray_type_threshold)
 
     if routing.use_classifier_layout:
+        rows = int(prediction.key[1])
+        cols = int(prediction.key[0])
+        debug_dir = Path(out_dir) / "debug" if save_debug else None
+        debug_prefix = prefix if save_debug else None
+        grid_result = infer_grid_from_separators_with_known_layout(
+            warped_bgr=warped_bgr,
+            rows=rows,
+            cols=cols,
+            debug_dir=debug_dir,
+            debug_prefix=debug_prefix,
+        )
         crops_dir = Path(out_dir) / "cell_crops" / prefix
         crop_paths = crop_cells_from_tray_type(
             warped_bgr=warped_bgr,
-            rows=int(prediction.key[1]),
-            cols=int(prediction.key[0]),
+            grid_x=grid_result.grid_x,
+            grid_y=grid_result.grid_y,
             out_dir=crops_dir,
             prefix=prefix,
             crop_pad=crop_pad,
             crop_min_size=crop_min_size,
         )
+        classifier_result = WarpedTrayProcessingResult(
+            image_path=image_path,
+            rows=rows,
+            cols=cols,
+            grid_x=grid_result.grid_x,
+            grid_y=grid_result.grid_y,
+            period_x=grid_result.period_x,
+            period_y=grid_result.period_y,
+            method=grid_result.method,
+            reason=grid_result.reason,
+            obliquity_angle_deg=0.0,
+            crop_count=len(crop_paths),
+            crop_paths=crop_paths,
+        )
+        if save_debug:
+            debug_dir = Path(out_dir) / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(debug_dir / f"{prefix}_grid_overlay_final.jpg"), grid_result.overlay_bgr)
         return PipelineResult(
             image_path=image_path,
             warped_bgr=warped_bgr,
             tray_type_key=prediction.key,
             tray_type_confidence=prediction.confidence,
             routing=routing,
-            rows=int(prediction.key[1]),
-            cols=int(prediction.key[0]),
-            method="tray_type_classifier",
-            reason="tray classifier confidence above threshold",
+            rows=rows,
+            cols=cols,
+            method=grid_result.method,
+            reason=grid_result.reason,
             crop_count=len(crop_paths),
             crop_paths=crop_paths,
-            fallback_result=None,
+            fallback_result=classifier_result,
         )
+
+    from src.cell_extraction.process_warped_tray import process_warped_tray_image
 
     fallback_result = process_warped_tray_image(
         warped_bgr=warped_bgr,

@@ -126,6 +126,49 @@ Open:
 
 Then run on a physical iPhone connected to the same Wi-Fi as the backend machine.
 
+## Reproducing this repo from a fresh clone
+
+These steps are enough for another developer to reproduce the backend and app from the remote repository.
+
+### Backend reproduction
+
+1. Clone the repository.
+2. Install Python dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Confirm the required model files exist:
+   - `models/tray_segmentation/trayseg_v18_1024.pt`
+   - `models/tray_classifier/best_traytype_net.pth`
+   - `models/germination/sapling_validity_resnet18.pt`
+4. Start the backend:
+
+```bash
+python3 scripts/run_backend.py --host 0.0.0.0 --port 8000
+```
+
+5. Verify it responds:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+### iOS app reproduction
+
+1. Open:
+   - [ios/GreenhouseHelper/GreenhouseHelper.xcodeproj](ios/GreenhouseHelper/GreenhouseHelper.xcodeproj)
+2. In Xcode, choose your Apple development team for signing.
+3. Confirm the app assets are present in `Assets.xcassets`.
+4. Point the app at the running backend in:
+   - [ios/GreenhouseHelper/App/AppSettings.swift](ios/GreenhouseHelper/App/AppSettings.swift)
+5. Build and run on a physical iPhone connected to the same Wi-Fi as the backend machine.
+
+### Important note about generated files
+
+The repository does not include generated Xcode derived data such as `.xcode-derived/`. That is intentional and does not prevent reproduction. Xcode regenerates those files locally as needed.
+
 ## API summary
 
 The local backend currently exposes:

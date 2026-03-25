@@ -60,6 +60,7 @@ def _generate_positions(
     search_frac: float = 0.35,
     min_sep_frac: float = 0.60,
     nbins: int = 64,
+    no_peak_placement: str = "predicted",
 ) -> list[int]:
     """Generate grid-line positions aligned with separator evidence."""
     if pitch is None or pitch <= 1 or limit <= 1:
@@ -104,7 +105,10 @@ def _generate_positions(
         if in_window.size > 0:
             best = int(in_window[np.argmax(proj_smooth[in_window])])
         else:
-            best = int(lo + np.argmax(proj_smooth[lo : hi + 1])) if hi >= lo else int(round(predicted))
+            if no_peak_placement == "local_argmax":
+                best = int(lo + np.argmax(proj_smooth[lo : hi + 1])) if hi >= lo else int(round(predicted))
+            else:
+                best = max(0, min(limit - 1, int(round(predicted))))
 
         if best - last < min_sep:
             continue
@@ -121,6 +125,7 @@ def infer_grid_from_separators(
     debug_prefix: str | None = None,
     min_period_px: int = 60,
     max_period_px: int | None = None,
+    no_peak_placement: str = "predicted",
 ) -> GridInferenceResult:
     """Infer tray grid from separator evidence only."""
     height, width = warped_bgr.shape[:2]
@@ -169,17 +174,6 @@ def infer_grid_from_separators(
     sx = smooth_1d(proj_x, k=max(31, roi_w // 40))
     sy = smooth_1d(proj_y, k=max(31, roi_h // 80))
 
-    per_x = estimate_period_autocorr(
-        sx,
-        lag_min=min_period_px,
-        lag_max=int(min(max_period_px, roi_w // 2)),
-    )
-    per_y = estimate_period_autocorr(
-        sy,
-        lag_min=min_period_px,
-        lag_max=int(min(max_period_px, roi_h // 2)),
-    )
-
     sxn = (sx - sx.min()) / (np.ptp(sx) + 1e-6)
     syn = (sy - sy.min()) / (np.ptp(sy) + 1e-6)
 
@@ -189,17 +183,32 @@ def infer_grid_from_separators(
     peaks_x, _ = find_peaks(sxn, distance=dist_x, prominence=0.02)
     peaks_y, _ = find_peaks(syn, distance=dist_y, prominence=0.02)
 
+    lag_max_x = int(min(max_period_px, roi_w // 2))
+    lag_max_y = int(min(max_period_px, roi_h // 2))
+    per_x = estimate_period_autocorr(
+        sx,
+        lag_min=min_period_px,
+        lag_max=lag_max_x,
+    )
+    per_y = estimate_period_autocorr(
+        sy,
+        lag_min=min_period_px,
+        lag_max=lag_max_y,
+    )
+
     grid_x = _generate_positions(
         int(per_x) if per_x is not None else None,
         roi_w,
         sx,
         peaks_x,
+        no_peak_placement=no_peak_placement,
     )
     grid_y = _generate_positions(
         int(per_y) if per_y is not None else None,
         roi_h,
         sy,
         peaks_y,
+        no_peak_placement=no_peak_placement,
     )
 
     edge_margin_x = max(8, int(0.35 * per_x)) if per_x is not None else 12
@@ -271,6 +280,159 @@ def infer_grid_from_separators(
         period_y=None if per_y is None else float(per_y),
         method="separator_longlines_raw_autocorr_lattice",
         reason=reason,
+        overlay_bgr=overlay,
+        separator_mask=tray_mask,
+        separator_lines=lines_u8,
+    )
+
+
+def infer_grid_from_separators_with_known_layout(
+    warped_bgr: np.ndarray,
+    rows: int,
+    cols: int,
+    debug_dir: str | Path | None = None,
+    debug_prefix: str | None = None,
+    no_peak_placement: str = "predicted",
+) -> GridInferenceResult:
+    """Place a grid using separator evidence while keeping classifier-provided rows/cols fixed."""
+    height, width = warped_bgr.shape[:2]
+
+    if rows <= 0 or cols <= 0:
+        raise ValueError("rows and cols must be positive for constrained grid placement")
+
+    tray_mask = separator_mask_graytray_refined(
+        warped_bgr,
+        debug_dir=debug_dir,
+        debug_prefix=debug_prefix,
+    )
+    lines, horiz, vert, preclosed = extract_separator_longlines(tray_mask)
+
+    if debug_dir is not None and debug_prefix:
+        debug_path = Path(debug_dir)
+        debug_path.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_preclosed.jpg"), preclosed)
+        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_longlines.jpg"), lines)
+        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_horiz.jpg"), horiz)
+        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_vert.jpg"), vert)
+
+    lines_u8 = (lines > 127).astype(np.uint8) * 255
+    lines_u8 = cv2.dilate(
+        lines_u8,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+        iterations=1,
+    )
+
+    lines_infer = lines_u8.copy()
+    border_th = 4
+    lines_infer[:border_th, :] = 255
+    lines_infer[-border_th:, :] = 255
+    lines_infer[:, :border_th] = 255
+    lines_infer[:, -border_th:] = 255
+
+    roi = lines_infer
+    roi_h, roi_w = roi.shape[:2]
+
+    proj_x = (roi > 0).sum(axis=0).astype(np.float32)
+    proj_y = (roi > 0).sum(axis=1).astype(np.float32)
+
+    sx = smooth_1d(proj_x, k=max(31, roi_w // 40))
+    sy = smooth_1d(proj_y, k=max(31, roi_h // 80))
+
+    sxn = (sx - sx.min()) / (np.ptp(sx) + 1e-6)
+    syn = (sy - sy.min()) / (np.ptp(sy) + 1e-6)
+
+    dist_x = max(8, int(roi_w / 80))
+    dist_y = max(8, int(roi_h / 120))
+
+    peaks_x, _ = find_peaks(sxn, distance=dist_x, prominence=0.02)
+    peaks_y, _ = find_peaks(syn, distance=dist_y, prominence=0.02)
+
+    expected_pitch_x = max(2, int(round(float(roi_w) / float(cols))))
+    expected_pitch_y = max(2, int(round(float(roi_h) / float(rows))))
+
+    grid_x = _generate_positions(
+        expected_pitch_x,
+        roi_w,
+        sx,
+        peaks_x,
+        no_peak_placement=no_peak_placement,
+    )
+    grid_y = _generate_positions(
+        expected_pitch_y,
+        roi_h,
+        sy,
+        peaks_y,
+        no_peak_placement=no_peak_placement,
+    )
+
+    edge_margin_x = max(8, int(0.35 * expected_pitch_x))
+    edge_margin_y = max(8, int(0.35 * expected_pitch_y))
+
+    grid_x = sorted(set(int(v) for v in grid_x if edge_margin_x <= int(v) <= roi_w - 1 - edge_margin_x))
+    grid_y = sorted(set(int(v) for v in grid_y if edge_margin_y <= int(v) <= roi_h - 1 - edge_margin_y))
+
+    if len(grid_x) > max(0, cols - 1):
+        grid_x = grid_x[: cols - 1]
+    if len(grid_y) > max(0, rows - 1):
+        grid_y = grid_y[: rows - 1]
+
+    while len(grid_x) < max(0, cols - 1):
+        expected = int(round((len(grid_x) + 1) * roi_w / float(cols)))
+        expected = max(1, min(roi_w - 2, expected))
+        if expected not in grid_x:
+            grid_x.append(expected)
+        grid_x = sorted(set(grid_x))
+        if len(grid_x) >= cols - 1:
+            break
+
+    while len(grid_y) < max(0, rows - 1):
+        expected = int(round((len(grid_y) + 1) * roi_h / float(rows)))
+        expected = max(1, min(roi_h - 2, expected))
+        if expected not in grid_y:
+            grid_y.append(expected)
+        grid_y = sorted(set(grid_y))
+        if len(grid_y) >= rows - 1:
+            break
+
+    grid_x = sorted(set([0] + grid_x + [roi_w - 1])) if roi_w > 1 else [0]
+    grid_y = sorted(set([0] + grid_y + [roi_h - 1])) if roi_h > 1 else [0]
+
+    lattice_full = np.zeros((height, width), dtype=np.uint8)
+    thickness = 6
+
+    for x in grid_x:
+        cv2.line(lattice_full, (int(x), 0), (int(x), height - 1), 255, thickness)
+    for y in grid_y:
+        cv2.line(lattice_full, (0, int(y)), (width - 1, int(y)), 255, thickness)
+
+    completed_full = cv2.bitwise_or(lines_u8, lattice_full)
+
+    overlay = warped_bgr.copy()
+    for x in grid_x:
+        cv2.line(overlay, (int(x), 0), (int(x), height - 1), (0, 0, 255), 2)
+    for y in grid_y:
+        cv2.line(overlay, (0, int(y)), (width - 1, int(y)), (0, 0, 255), 2)
+
+    if debug_dir is not None and debug_prefix:
+        debug_path = Path(debug_dir)
+        debug_path.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_longlines_raw_dilated.jpg"), lines_u8)
+        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_lattice_raw.jpg"), lattice_full)
+        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_completed_mask_raw.jpg"), completed_full)
+        completed_overlay = warped_bgr.copy()
+        completed_overlay[completed_full > 0] = (255, 255, 255)
+        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_completed_overlay_raw.jpg"), completed_overlay)
+        cv2.imwrite(str(debug_path / f"{debug_prefix}_grid_overlay_sep.jpg"), overlay)
+
+    return GridInferenceResult(
+        rows=int(rows),
+        cols=int(cols),
+        grid_x=[int(v) for v in grid_x],
+        grid_y=[int(v) for v in grid_y],
+        period_x=float(expected_pitch_x),
+        period_y=float(expected_pitch_y),
+        method="tray_type_classifier_separator_placement",
+        reason="tray classifier confidence above threshold with separator-informed placement",
         overlay_bgr=overlay,
         separator_mask=tray_mask,
         separator_lines=lines_u8,

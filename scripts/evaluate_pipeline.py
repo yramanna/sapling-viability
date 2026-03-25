@@ -4,20 +4,16 @@ import argparse
 import csv
 import json
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ultralytics import YOLO
-
-from src.germination import load_validity_model, predict_validity_for_tray, summarize_tray_validity
-from src.pipeline.run_full_pipeline import run_full_pipeline
-from src.utils.visualization import render_validity_overlay
+from src.backend.service import TrayAnalysisService, TrayAnalysisServiceConfig
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+BACKEND_DEFAULTS = TrayAnalysisServiceConfig()
 
 
 def parse_args() -> argparse.Namespace:
@@ -68,8 +64,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tray-type-threshold",
         type=float,
-        default=0.90,
-        help="Confidence threshold for trusting tray-type classifier output.",
+        default=BACKEND_DEFAULTS.tray_type_threshold,
+        help="Confidence threshold for trusting tray-type classifier output. Defaults to the backend service setting.",
     )
     parser.add_argument(
         "--rectified-width",
@@ -130,30 +126,31 @@ def collect_image_paths(input_dir: Path, pattern: str | None, limit: int | None)
 
 
 def build_result_row(
-    result,
+    response: dict[str, object],
     truth: dict[str, int] | None,
-    tray_stats: dict[str, float | int] | None = None,
 ) -> dict[str, object]:
-    predicted_rows = result.rows
-    predicted_cols = result.cols
+    tray = dict(response.get("tray", {}))
+    tray_stats = dict(response.get("tray_stats", {}))
+    artifacts = dict(response.get("artifacts", {}))
+    predicted_rows = tray.get("rows")
+    predicted_cols = tray.get("cols")
+    tray_type_key = tray.get("tray_type_key")
     row = {
-        "image": Path(result.image_path).name if result.image_path else "",
+        "image": str(response.get("source_image_name", "")),
         "pred_rows": predicted_rows,
         "pred_cols": predicted_cols,
-        "annotated_image_path": result.annotated_image_path,
-        "tray_type_key": "" if result.tray_type_key is None else "x".join(str(v) for v in result.tray_type_key),
-        "tray_type_confidence": result.tray_type_confidence,
-        "route": None if result.routing is None else (
-            "classifier" if result.routing.use_classifier_layout else "cv_fallback"
-        ),
-        "threshold": None if result.routing is None else result.routing.threshold,
-        "method": result.method,
-        "reason": result.reason,
-        "crop_count": result.crop_count,
+        "annotated_image_path": artifacts.get("annotated_image_path"),
+        "rectified_image_path": artifacts.get("rectified_image_path"),
+        "result_json_path": artifacts.get("result_json_path"),
+        "tray_type_key": "" if tray_type_key is None else "x".join(str(v) for v in tray_type_key),
+        "tray_type_confidence": tray.get("tray_type_confidence"),
+        "route": tray.get("route"),
+        "method": tray.get("method"),
+        "reason": tray.get("reason"),
+        "crop_count": tray.get("crop_count"),
     }
 
-    if tray_stats is not None:
-        row.update(tray_stats)
+    row.update(tray_stats)
 
     if truth is not None:
         row["true_rows"] = truth["rows"]
@@ -213,39 +210,6 @@ def write_csv(rows: list[dict[str, object]], path: Path) -> None:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
-
-
-def save_annotated_result(output_dir: Path, result) -> str | None:
-    if result.warped_bgr is None or result.rows is None or result.cols is None:
-        return None
-
-    annotated_dir = output_dir / "annotated"
-    annotated_dir.mkdir(parents=True, exist_ok=True)
-
-    grid_x = None
-    grid_y = None
-    if result.fallback_result is not None:
-        grid_x = result.fallback_result.grid_x
-        grid_y = result.fallback_result.grid_y
-
-    annotated_bgr = render_validity_overlay(
-        warped_bgr=result.warped_bgr,
-        predictions=result.cell_predictions or [],
-        tray_stats=result.tray_stats,
-        rows=int(result.rows),
-        cols=int(result.cols),
-        grid_x=grid_x,
-        grid_y=grid_y,
-    )
-
-    image_stem = Path(result.image_path).stem if result.image_path else "tray"
-    annotated_path = annotated_dir / f"{image_stem}.annotated.jpg"
-    import cv2
-
-    cv2.imwrite(str(annotated_path), annotated_bgr)
-    return str(annotated_path)
-
-
 def main() -> None:
     args = parse_args()
     input_dir = Path(args.input_dir)
@@ -260,54 +224,52 @@ def main() -> None:
     if not image_paths:
         raise FileNotFoundError(f"No images found in {input_dir}")
 
-    yolo_model = YOLO(str(args.yolo_weights))
-    validity_model, validity_device = load_validity_model(args.validity_checkpoint)
-    rows: list[dict[str, object]] = []
-
-    for image_path in image_paths:
-        result = run_full_pipeline(
-            image=image_path,
-            yolo_model=yolo_model,
-            tray_type_checkpoint_path=args.tray_checkpoint,
-            out_dir=output_dir,
-            prefix=image_path.stem,
+    service = TrayAnalysisService(
+        TrayAnalysisServiceConfig(
+            output_dir=output_dir,
+            yolo_weights=Path(args.yolo_weights),
+            tray_checkpoint=Path(args.tray_checkpoint),
+            validity_checkpoint=Path(args.validity_checkpoint),
             tray_type_threshold=args.tray_type_threshold,
             rectified_width=args.rectified_width,
             save_debug=args.save_debug,
             apply_obliquity_correction=args.obliquity_correction,
         )
+    )
+    rows: list[dict[str, object]] = []
 
-        if result.crop_paths:
-            cell_predictions = predict_validity_for_tray(
-                crop_paths=result.crop_paths,
-                model=validity_model,
-                device=validity_device,
-            )
-            tray_stats = summarize_tray_validity(cell_predictions)
-        else:
-            cell_predictions = []
-            tray_stats = summarize_tray_validity(cell_predictions)
-
-        result.cell_predictions = cell_predictions
-        result.tray_stats = tray_stats
-        if not args.no_annotated_output:
-            result.annotated_image_path = save_annotated_result(output_dir, result)
-
+    for image_path in image_paths:
         truth = truth_map.get(image_path.name)
-        rows.append(build_result_row(result, truth, tray_stats=tray_stats))
+        try:
+            response = service.analyze_image(image_path)
+        except Exception as exc:
+            rows.append(
+                {
+                    "image": image_path.name,
+                    "pred_rows": None,
+                    "pred_cols": None,
+                    "annotated_image_path": None,
+                    "rectified_image_path": None,
+                    "result_json_path": None,
+                    "tray_type_key": "",
+                    "tray_type_confidence": None,
+                    "route": None,
+                    "method": "backend_error",
+                    "reason": str(exc),
+                    "crop_count": 0,
+                }
+            )
+            continue
 
-        warped_dir = output_dir / "warped"
-        warped_dir.mkdir(parents=True, exist_ok=True)
-        if result.warped_bgr is not None:
-            import cv2
+        if args.no_annotated_output:
+            annotated_path = response.get("artifacts", {}).get("annotated_image_path")
+            if annotated_path:
+                annotated_file = Path(str(annotated_path))
+                if annotated_file.exists():
+                    annotated_file.unlink()
+                response["artifacts"]["annotated_image_path"] = None
 
-            cv2.imwrite(str(warped_dir / f"{image_path.stem}.rectified.jpg"), result.warped_bgr)
-
-        result_json = output_dir / f"{image_path.stem}.result.json"
-        serializable = asdict(result)
-        serializable["warped_bgr"] = None
-        with result_json.open("w") as handle:
-            json.dump(serializable, handle, indent=2)
+        rows.append(build_result_row(response, truth))
 
     results_csv = output_dir / "results.csv"
     write_csv(rows, results_csv)

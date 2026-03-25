@@ -18,7 +18,6 @@ private func captureFrameRect(in size: CGSize) -> CGRect {
 
 struct CaptureView: View {
     let headerTitle: String
-    let headerSubtitle: String
     let secondaryActionTitle: String?
     let onCaptured: (UIImage) -> Void
     let onClose: () -> Void
@@ -87,16 +86,11 @@ struct CaptureView: View {
                             .frame(width: 7, height: 7)
                             .shadow(color: AppPalette.lightGreen.opacity(0.7), radius: 6, x: 0, y: 0)
 
-                        Text(headerTitle)
+                        Text("HOLD PARALLEL TO TRAY")
                             .font(.system(size: 11, weight: .semibold, design: .default))
                             .tracking(1.6)
                             .foregroundStyle(AppPalette.lightGreen.opacity(0.96))
                     }
-
-                    Text(headerSubtitle)
-                        .font(.system(size: 12, weight: .semibold, design: .default))
-                        .tracking(1.2)
-                        .foregroundStyle(AppPalette.white.opacity(0.78))
                 }
 
                 Spacer()

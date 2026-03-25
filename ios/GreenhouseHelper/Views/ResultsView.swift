@@ -179,8 +179,11 @@ struct ResultsView: View {
     let onSecondaryAction: (() -> Void)?
     let tertiaryButtonTitle: String?
     let onTertiaryAction: (() -> Void)?
+    let destructiveButtonTitle: String?
+    let onDestructiveAction: (() -> Void)?
 
     @State private var showingTrayViewer = false
+    @State private var showingDeleteConfirmation = false
 
     init(
         result: AnalysisResult,
@@ -191,7 +194,9 @@ struct ResultsView: View {
         secondaryButtonTitle: String? = nil,
         onSecondaryAction: (() -> Void)? = nil,
         tertiaryButtonTitle: String? = nil,
-        onTertiaryAction: (() -> Void)? = nil
+        onTertiaryAction: (() -> Void)? = nil,
+        destructiveButtonTitle: String? = nil,
+        onDestructiveAction: (() -> Void)? = nil
     ) {
         self.result = result
         self.cachedImageURL = cachedImageURL
@@ -202,6 +207,8 @@ struct ResultsView: View {
         self.onSecondaryAction = onSecondaryAction
         self.tertiaryButtonTitle = tertiaryButtonTitle
         self.onTertiaryAction = onTertiaryAction
+        self.destructiveButtonTitle = destructiveButtonTitle
+        self.onDestructiveAction = onDestructiveAction
     }
 
     var body: some View {
@@ -249,12 +256,14 @@ struct ResultsView: View {
                             metricTile(title: "Total", value: "\(result.trayStats.totalCells)")
                         }
 
-                        if let primaryButtonTitle, let onPrimaryAction {
+                        if primaryButtonTitle != nil || secondaryButtonTitle != nil || tertiaryButtonTitle != nil || destructiveButtonTitle != nil {
                             VStack(spacing: 12) {
-                                Button(primaryButtonTitle) {
-                                    onPrimaryAction()
+                                if let primaryButtonTitle, let onPrimaryAction {
+                                    Button(primaryButtonTitle) {
+                                        onPrimaryAction()
+                                    }
+                                    .buttonStyle(PrimaryButtonStyle())
                                 }
-                                .buttonStyle(PrimaryButtonStyle())
 
                                 if let secondaryButtonTitle, let onSecondaryAction {
                                     Button(secondaryButtonTitle) {
@@ -268,6 +277,15 @@ struct ResultsView: View {
                                         onTertiaryAction()
                                     }
                                     .buttonStyle(PrimaryButtonStyle())
+                                }
+
+                                if let destructiveButtonTitle, onDestructiveAction != nil {
+                                    Button {
+                                        showingDeleteConfirmation = true
+                                    } label: {
+                                        destructiveActionRow(title: destructiveButtonTitle)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                             }
                             .padding(.horizontal, 18)
@@ -292,6 +310,14 @@ struct ResultsView: View {
         }
         .toolbar(allowsSystemBackNavigation ? .visible : .hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(!allowsSystemBackNavigation)
+        .alert("Delete this tray from history?", isPresented: $showingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                onDestructiveAction?()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the saved result and cached tray image from this device.")
+        }
         .fullScreenCover(isPresented: $showingTrayViewer) {
             TrayLightboxView(
                 urlString: result.artifacts.annotatedImageURL,
@@ -356,6 +382,31 @@ struct ResultsView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(AppPalette.cardBorder.opacity(0.65), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func destructiveActionRow(title: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "trash")
+                .font(.system(size: 14, weight: .semibold))
+
+            Text(title)
+                .font(AppFont.body(size: 15, weight: .semibold))
+                .tracking(-0.14)
+
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(Color.red.opacity(0.82))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.red.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.red.opacity(0.12), lineWidth: 1)
         )
     }
 }

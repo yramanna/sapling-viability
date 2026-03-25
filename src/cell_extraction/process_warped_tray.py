@@ -17,7 +17,7 @@ from src.cell_extraction.separator_mask import separator_mask_graytray_refined
 
 @dataclass
 class WarpedTrayProcessingResult:
-    image_path: str
+    image_path: str | None
     rows: int | None
     cols: int | None
     grid_x: list[int]
@@ -31,15 +31,26 @@ class WarpedTrayProcessingResult:
     crop_paths: list[str]
 
 
+@dataclass(frozen=True)
+class WarpedTrayProcessingOptions:
+    crop_pad: int = 0
+    crop_min_size: int = 8
+    save_debug: bool = True
+    apply_obliquity_correction: bool = False
+    obliquity_roi_xywh: tuple[int, int, int, int] | None = None
+    obliquity_min_hproj: float = 45.0
+    obliquity_max_abs_angle_deg: float = 7.5
+    obliquity_max_tilt_deg: float = 10.0
+    obliquity_passes: int = 2
+    no_peak_placement: str = "predicted"
+
+
 DEFAULT_RECTIFIED_DIR = Path("data/processed")
 DEFAULT_OUTPUT_DIR = Path("data/output")
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
 
-def process_warped_tray_image(
-    warped_bgr: np.ndarray,
-    out_dir: str | Path,
-    prefix: str = "tray",
+def _build_processing_options(
     crop_pad: int = 0,
     crop_min_size: int = 8,
     save_debug: bool = True,
@@ -49,6 +60,37 @@ def process_warped_tray_image(
     obliquity_max_abs_angle_deg: float = 7.5,
     obliquity_max_tilt_deg: float = 10.0,
     obliquity_passes: int = 2,
+    no_peak_placement: str = "predicted",
+) -> WarpedTrayProcessingOptions:
+    return WarpedTrayProcessingOptions(
+        crop_pad=crop_pad,
+        crop_min_size=crop_min_size,
+        save_debug=save_debug,
+        apply_obliquity_correction=apply_obliquity_correction,
+        obliquity_roi_xywh=obliquity_roi_xywh,
+        obliquity_min_hproj=obliquity_min_hproj,
+        obliquity_max_abs_angle_deg=obliquity_max_abs_angle_deg,
+        obliquity_max_tilt_deg=obliquity_max_tilt_deg,
+        obliquity_passes=obliquity_passes,
+        no_peak_placement=no_peak_placement,
+    )
+
+
+def process_warped_tray_image(
+    warped_bgr: np.ndarray,
+    out_dir: str | Path,
+    prefix: str = "tray",
+    image_path: str | None = None,
+    crop_pad: int = 0,
+    crop_min_size: int = 8,
+    save_debug: bool = True,
+    apply_obliquity_correction: bool = False,
+    obliquity_roi_xywh: tuple[int, int, int, int] | None = None,
+    obliquity_min_hproj: float = 45.0,
+    obliquity_max_abs_angle_deg: float = 7.5,
+    obliquity_max_tilt_deg: float = 10.0,
+    obliquity_passes: int = 2,
+    no_peak_placement: str = "predicted",
 ) -> WarpedTrayProcessingResult:
     """
     Process a rectified tray image into inferred grid + per-cell crops.
@@ -74,17 +116,29 @@ def process_warped_tray_image(
     -------
     WarpedTrayProcessingResult
     """
+    options = _build_processing_options(
+        crop_pad=crop_pad,
+        crop_min_size=crop_min_size,
+        save_debug=save_debug,
+        apply_obliquity_correction=apply_obliquity_correction,
+        obliquity_roi_xywh=obliquity_roi_xywh,
+        obliquity_min_hproj=obliquity_min_hproj,
+        obliquity_max_abs_angle_deg=obliquity_max_abs_angle_deg,
+        obliquity_max_tilt_deg=obliquity_max_tilt_deg,
+        obliquity_passes=obliquity_passes,
+        no_peak_placement=no_peak_placement,
+    )
     out_dir = Path(out_dir)
     debug_dir = out_dir / "debug"
     crops_dir = out_dir / "cell_crops" / prefix
 
-    debug_arg = debug_dir if save_debug else None
-    debug_prefix = prefix if save_debug else None
+    debug_arg = debug_dir if options.save_debug else None
+    debug_prefix = prefix if options.save_debug else None
 
     corrected_warp = warped_bgr
     obliquity_angle_deg = 0.0
 
-    if apply_obliquity_correction:
+    if options.apply_obliquity_correction:
         separator_mask = separator_mask_graytray_refined(
             warped_bgr,
             debug_dir=debug_arg,
@@ -94,19 +148,20 @@ def process_warped_tray_image(
         corrected_warp, _, obliquity_angle_deg = correct_obliquity(
             evidence_bgr=evidence_bgr,
             warped_bgr=warped_bgr,
-            roi_xywh=obliquity_roi_xywh,
-            min_hproj=obliquity_min_hproj,
-            horiz_max_abs_angle_deg=obliquity_max_abs_angle_deg,
-            max_tilt_deg=obliquity_max_tilt_deg,
+            roi_xywh=options.obliquity_roi_xywh,
+            min_hproj=options.obliquity_min_hproj,
+            horiz_max_abs_angle_deg=options.obliquity_max_abs_angle_deg,
+            max_tilt_deg=options.obliquity_max_tilt_deg,
             debug_dir=debug_arg,
             debug_prefix=debug_prefix,
-            passes=obliquity_passes,
+            passes=options.obliquity_passes,
         )
 
     grid_result: GridInferenceResult = infer_grid_from_separators(
         corrected_warp,
         debug_dir=debug_arg,
         debug_prefix=debug_prefix,
+        no_peak_placement=options.no_peak_placement,
     )
 
     saved = crop_cells_from_grid(
@@ -114,21 +169,21 @@ def process_warped_tray_image(
         grid_result.grid_x,
         grid_result.grid_y,
         out_dir=crops_dir,
-        pad=crop_pad,
-        min_size=crop_min_size,
+        pad=options.crop_pad,
+        min_size=options.crop_min_size,
         prefix=prefix,
     )
 
     crop_paths = [path for _, _, path in saved]
 
-    if save_debug:
+    if options.save_debug:
         debug_dir.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(debug_dir / f"{prefix}_grid_overlay_final.jpg"), grid_result.overlay_bgr)
-        if apply_obliquity_correction:
+        if options.apply_obliquity_correction:
             cv2.imwrite(str(debug_dir / f"{prefix}_warped_obliquity_corrected.jpg"), corrected_warp)
 
     return WarpedTrayProcessingResult(
-        image_path="",
+        image_path=image_path,
         rows=grid_result.rows,
         cols=grid_result.cols,
         grid_x=grid_result.grid_x,
@@ -156,6 +211,7 @@ def process_warped_tray_path(
     obliquity_max_abs_angle_deg: float = 7.5,
     obliquity_max_tilt_deg: float = 10.0,
     obliquity_passes: int = 2,
+    no_peak_placement: str = "predicted",
 ) -> WarpedTrayProcessingResult:
     """
     Load a rectified tray image from disk and process it.
@@ -169,7 +225,7 @@ def process_warped_tray_path(
     if prefix is None:
         prefix = image_path.stem
 
-    result = process_warped_tray_image(
+    return process_warped_tray_image(
         warped_bgr=warped_bgr,
         out_dir=out_dir,
         prefix=prefix,
@@ -182,9 +238,9 @@ def process_warped_tray_path(
         obliquity_max_abs_angle_deg=obliquity_max_abs_angle_deg,
         obliquity_max_tilt_deg=obliquity_max_tilt_deg,
         obliquity_passes=obliquity_passes,
+        no_peak_placement=no_peak_placement,
+        image_path=str(image_path),
     )
-    result.image_path = str(image_path)
-    return result
 
 
 def process_warped_tray_directory(
@@ -199,6 +255,7 @@ def process_warped_tray_directory(
     obliquity_max_abs_angle_deg: float = 7.5,
     obliquity_max_tilt_deg: float = 10.0,
     obliquity_passes: int = 2,
+    no_peak_placement: str = "predicted",
 ) -> list[WarpedTrayProcessingResult]:
     """
     Process all rectified tray images in a directory.
@@ -229,6 +286,7 @@ def process_warped_tray_directory(
                 obliquity_max_abs_angle_deg=obliquity_max_abs_angle_deg,
                 obliquity_max_tilt_deg=obliquity_max_tilt_deg,
                 obliquity_passes=obliquity_passes,
+                no_peak_placement=no_peak_placement,
             )
         )
 

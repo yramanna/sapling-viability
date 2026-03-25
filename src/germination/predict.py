@@ -52,10 +52,11 @@ def predict_validity_for_crop(
     model: torch.nn.Module,
     device: str | torch.device | None = None,
     class_names: Sequence[str] = DEFAULT_VALIDITY_CLASS_NAMES,
+    transform=None,
 ) -> CellValidityPrediction:
     """Run notebook-style validity inference for one cropped cell image."""
     resolved_device = torch.device(device) if device is not None else next(model.parameters()).device
-    transform = get_validity_inference_transform()
+    transform = transform or get_validity_inference_transform()
     crop_path = Path(crop_path)
 
     image = Image.open(crop_path).convert("RGB")
@@ -83,8 +84,15 @@ def predict_validity_for_tray(
     class_names: Sequence[str] = DEFAULT_VALIDITY_CLASS_NAMES,
 ) -> list[CellValidityPrediction]:
     """Run validity inference across all cropped cells for a tray."""
+    transform = get_validity_inference_transform()
     return [
-        predict_validity_for_crop(crop_path, model=model, device=device, class_names=class_names)
+        predict_validity_for_crop(
+            crop_path,
+            model=model,
+            device=device,
+            class_names=class_names,
+            transform=transform,
+        )
         for crop_path in sorted(crop_paths, key=lambda p: Path(p).name)
     ]
 

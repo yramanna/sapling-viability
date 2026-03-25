@@ -120,11 +120,11 @@ struct HomeView: View {
                 switch route {
                 case .batchSetup:
                     BatchSetupView(
-                        onStart: { name, startingTrayNumber in
-                            startBatchSession(name: name, startingTrayNumber: startingTrayNumber)
+                        onStart: { name in
+                            startBatchSession(name: name)
                         },
                         onSkip: {
-                            startBatchSession(name: "", startingTrayNumber: 1)
+                            startBatchSession(name: "")
                         }
                     )
                 case .singleTray:
@@ -236,7 +236,18 @@ struct HomeView: View {
                                 if let sessionID = saved.sessionID {
                                     navigationPath = [.sessionSummary(sessionID)]
                                 }
-                            } : nil
+                            } : nil,
+                            destructiveButtonTitle: "Remove from History",
+                            onDestructiveAction: {
+                                historyStore.deleteAnalysis(id: saved.id)
+                                if let sessionID = saved.sessionID {
+                                    navigationPath = historyStore.savedSessions.contains(where: { $0.id == sessionID })
+                                        ? [.history, .sessionDetail(sessionID)]
+                                        : [.history]
+                                } else {
+                                    navigationPath = [.history]
+                                }
+                            }
                         )
                     }
                 }
@@ -244,7 +255,6 @@ struct HomeView: View {
             .fullScreenCover(item: $activeCaptureMode) { mode in
                 CaptureView(
                     headerTitle: mode == .batch ? "SESSION" : "CAPTURE",
-                    headerSubtitle: "HOLD PARALLEL TO TRAY",
                     secondaryActionTitle: nil,
                     onCaptured: { captured in
                         startProcessing(with: captured, mode: mode == .batch ? .batch : .single)
@@ -315,12 +325,12 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
-    private func startBatchSession(name: String, startingTrayNumber: Int) {
+    private func startBatchSession(name: String) {
         currentSession = ActiveBatchSession(
             id: UUID().uuidString,
             startedAt: Date(),
             name: name,
-            nextTrayNumber: max(1, startingTrayNumber),
+            nextTrayNumber: 1,
             scannedCount: 0
         )
         navigationPath = []
@@ -435,142 +445,149 @@ private struct AnchoredActionScreen<Background: View, Header: View, Actions: Vie
 }
 
 private struct BatchSetupView: View {
-    let onStart: (String, Int) -> Void
+    let onStart: (String) -> Void
     let onSkip: () -> Void
 
     @State private var sessionName = ""
-    @State private var startingTrayNumber = "1"
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case sessionName
+    }
 
     var body: some View {
-        AnchoredActionScreen(
-            background: {
-                ZStack {
-                    AppPalette.surface
+        GeometryReader { geometry in
+            ZStack(alignment: .top) {
+                AppPalette.surface
+                    .ignoresSafeArea()
 
-                    LinearGradient(
-                        colors: [
-                            AppPalette.lightGreen.opacity(0.14),
-                            AppPalette.surface.opacity(0.0)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(maxHeight: 280)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                }
-            },
-            header: {
-                VStack(alignment: .leading, spacing: 26) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("BATCH MODE")
-                            .font(AppFont.caption(size: 13, weight: .semibold))
-                            .tracking(1.6)
-                            .textCase(.uppercase)
-                            .foregroundStyle(AppPalette.lightGreen.opacity(0.95))
+                LinearGradient(
+                    colors: [
+                        AppPalette.lightGreen.opacity(0.14),
+                        AppPalette.surface.opacity(0.0)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 280)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .padding(.top, geometry.safeAreaInsets.top + 44)
 
-                        Text("Batch Scan Setup")
-                            .font(AppFont.title(size: 34, weight: .bold))
-                            .tracking(-0.34)
-                            .foregroundStyle(AppPalette.darkGreen)
+                Rectangle()
+                    .fill(AppPalette.surface)
+                    .frame(height: geometry.safeAreaInsets.top + 44)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .ignoresSafeArea(edges: .top)
 
-                        Text("Create a light session context before scanning a long run of trays.")
-                            .font(AppFont.body(size: 16, weight: .medium))
-                            .tracking(-0.16)
-                            .foregroundStyle(AppPalette.mutedText)
-                    }
-
-                    VStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Session name")
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 26) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("BATCH MODE")
                                 .font(AppFont.caption(size: 13, weight: .semibold))
-                                .tracking(1.1)
+                                .tracking(1.6)
                                 .textCase(.uppercase)
-                                .foregroundStyle(AppPalette.mutedText)
+                                .foregroundStyle(AppPalette.lightGreen.opacity(0.95))
 
-                            TextField("Zone A Morning", text: $sessionName)
-                                .textInputAutocapitalization(.words)
+                            Text("Batch Scan Setup")
+                                .font(AppFont.title(size: 34, weight: .bold))
+                                .tracking(-0.34)
                                 .foregroundStyle(AppPalette.darkGreen)
-                                .tint(AppPalette.darkGreen)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 15)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                        .fill(AppPalette.card)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                        .stroke(AppPalette.cardBorder, lineWidth: 1)
-                                )
+
+                            Text("Name the session if helpful, then start scanning.")
+                                .font(AppFont.body(size: 16, weight: .medium))
+                                .tracking(-0.16)
+                                .foregroundStyle(AppPalette.mutedText)
                         }
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Starting tray number")
-                                .font(AppFont.caption(size: 13, weight: .semibold))
-                                .tracking(1.1)
-                                .textCase(.uppercase)
-                                .foregroundStyle(AppPalette.mutedText)
+                        VStack(spacing: 16) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Session name")
+                                    .font(AppFont.caption(size: 13, weight: .semibold))
+                                    .tracking(1.1)
+                                    .textCase(.uppercase)
+                                    .foregroundStyle(AppPalette.mutedText)
 
-                            TextField("1", text: $startingTrayNumber)
-                                .keyboardType(.numberPad)
-                                .foregroundStyle(AppPalette.darkGreen)
-                                .tint(AppPalette.darkGreen)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 15)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                        .fill(AppPalette.card)
+                                TextField(
+                                    "",
+                                    text: $sessionName,
+                                    prompt: Text("Zone A Morning")
+                                        .foregroundStyle(AppPalette.mutedText.opacity(0.72))
                                 )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                        .stroke(AppPalette.cardBorder, lineWidth: 1)
-                                )
+                                    .textInputAutocapitalization(.words)
+                                    .autocorrectionDisabled()
+                                    .textFieldStyle(.plain)
+                                    .submitLabel(.done)
+                                    .focused($focusedField, equals: .sessionName)
+                                    .onSubmit {
+                                        focusedField = nil
+                                    }
+                                    .foregroundStyle(AppPalette.darkGreen)
+                                    .tint(AppPalette.darkGreen)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 15)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                            .fill(AppPalette.card)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                            .stroke(AppPalette.cardBorder, lineWidth: 1)
+                                    )
+                            }
+
                         }
-                    }
 
-                    Text("For scanning long tray runs with minimal interruptions.")
-                        .font(AppFont.caption(size: 14, weight: .medium))
-                        .tracking(-0.12)
-                        .foregroundStyle(AppPalette.mutedText.opacity(0.82))
-                }
-            },
-            actions: {
-                VStack(spacing: 14) {
-                    Button("Begin Batch Scan") {
-                        onStart(sessionName.trimmingCharacters(in: .whitespacesAndNewlines), Int(startingTrayNumber) ?? 1)
+                        Spacer(minLength: 120)
                     }
-                    .buttonStyle(PrimaryButtonStyle())
-
-                    Button("Scan Without Setup") {
-                        onSkip()
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 20)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .fill(AppPalette.card)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .stroke(AppPalette.cardBorder, lineWidth: 1)
-                )
-                .shadow(
-                    color: AppPalette.darkGreen.opacity(0.08),
-                    radius: 20,
-                    x: 0,
-                    y: 10
-                )
-            },
-            footer: {
-                EmptyView()
-            },
-            headerTopPadding: 8,
-            actionTopRatio: ActionAnchorMetrics.cardTopRatio,
-            footerBottomPadding: 0
-        )
+                .scrollDismissesKeyboard(.interactively)
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedField = .sessionName
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 14) {
+                Button("Begin Batch Scan") {
+                    focusedField = nil
+                    onStart(sessionName.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                .buttonStyle(PrimaryButtonStyle())
+
+                Button("Scan Without Setup") {
+                    onSkip()
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(AppPalette.card)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(AppPalette.cardBorder, lineWidth: 1)
+            )
+            .shadow(
+                color: AppPalette.darkGreen.opacity(0.08),
+                radius: 20,
+                x: 0,
+                y: 10
+            )
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
+        }
+        .onTapGesture {
+            focusedField = nil
+        }
     }
 }
 
@@ -606,18 +623,18 @@ private struct SingleTrayEntryView: View {
                         .textCase(.uppercase)
                         .foregroundStyle(AppPalette.lightGreen.opacity(0.95))
 
-                    Text("One Tray Scan")
+                    Text("Quick Tray Review")
                         .font(AppFont.title(size: 34, weight: .bold))
                         .tracking(-0.34)
                         .foregroundStyle(AppPalette.darkGreen)
 
-                    Text("Capture or upload one tray when you need a closer review outside the batch workflow.")
+                    Text("Capture or upload a single tray for a quick viability check.")
                         .font(AppFont.body(size: 16, weight: .medium))
                         .tracking(-0.16)
                         .foregroundStyle(AppPalette.mutedText)
                         .frame(maxWidth: 320, alignment: .leading)
 
-                    Text("Best for one-off review and spot checks.")
+                    Text("Best for quick inspections and follow-up checks.")
                         .font(AppFont.caption(size: 14, weight: .medium))
                         .tracking(-0.12)
                         .foregroundStyle(AppPalette.mutedText.opacity(0.82))
