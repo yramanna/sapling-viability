@@ -7,6 +7,7 @@ __pycache__/
 
 .blogic/
 .venv/
+.xcode-derived/
 
 .ipynb_checkpoints/
 .DS_Store
