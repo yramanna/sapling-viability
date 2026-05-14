@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Tests for tray-type preprocessing, inference helpers, and route selection."""
+
 import numpy as np
 import torch
 
@@ -9,6 +11,8 @@ from src.tray_layout.tray_types import TrayTypeSpec, pretty_key, type_key_from_l
 
 
 class _DummyModel(torch.nn.Module):
+    """Minimal classifier stub that returns fixed logits for every input."""
+
     def __init__(self, logits: list[float]) -> None:
         super().__init__()
         self._logits = torch.tensor([logits], dtype=torch.float32)

@@ -3,7 +3,6 @@ from src.tray_layout.classify_tray import (
     TrayTypePrediction,
     load_tray_type_checkpoint,
     predict_tray_type,
-    predict_tray_type_from_checkpoint,
     resize_letterbox,
     to_tensor_norm,
 )
@@ -19,7 +18,6 @@ __all__ = [
     "choose_layout_route",
     "load_tray_type_checkpoint",
     "predict_tray_type",
-    "predict_tray_type_from_checkpoint",
     "pretty_key",
     "resize_letterbox",
     "to_tensor_norm",

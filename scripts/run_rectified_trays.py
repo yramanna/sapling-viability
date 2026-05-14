@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""CLI for running separator-based grid inference on rectified tray images."""
+
 import argparse
 import sys
 from pathlib import Path
@@ -17,6 +19,7 @@ from src.cell_extraction.process_warped_tray import (  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Create the command-line interface for rectified-tray processing."""
     parser = argparse.ArgumentParser(
         description="Infer tray grids from rectified tray images and save outputs.",
     )
@@ -48,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run the rectified-tray batch processor and print a short summary."""
     parser = build_parser()
     args = parser.parse_args()
 

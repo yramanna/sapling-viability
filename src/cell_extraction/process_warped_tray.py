@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+"""Process rectified tray images into separator-aligned cell crops."""
+
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -17,6 +19,7 @@ from src.cell_extraction.separator_mask import separator_mask_graytray_refined
 
 @dataclass
 class WarpedTrayProcessingResult:
+    """Final output from the rectified-tray CV pipeline."""
     image_path: str | None
     rows: int | None
     cols: int | None
@@ -33,6 +36,7 @@ class WarpedTrayProcessingResult:
 
 @dataclass(frozen=True)
 class WarpedTrayProcessingOptions:
+    """Configuration for grid inference, crop generation, and debug output."""
     crop_pad: int = 0
     crop_min_size: int = 8
     save_debug: bool = True
@@ -62,6 +66,7 @@ def _build_processing_options(
     obliquity_passes: int = 2,
     no_peak_placement: str = "predicted",
 ) -> WarpedTrayProcessingOptions:
+    """Normalize function arguments into one immutable options bundle."""
     return WarpedTrayProcessingOptions(
         crop_pad=crop_pad,
         crop_min_size=crop_min_size,
@@ -74,6 +79,15 @@ def _build_processing_options(
         obliquity_passes=obliquity_passes,
         no_peak_placement=no_peak_placement,
     )
+
+
+def _debug_paths(out_dir: Path, prefix: str, save_debug: bool) -> tuple[Path, Path, Path | None, str | None]:
+    """Build the standard output directories and debug arguments."""
+    debug_dir = out_dir / "debug"
+    crops_dir = out_dir / "cell_crops" / prefix
+    debug_arg = debug_dir if save_debug else None
+    debug_prefix = prefix if save_debug else None
+    return debug_dir, crops_dir, debug_arg, debug_prefix
 
 
 def process_warped_tray_image(
@@ -129,11 +143,11 @@ def process_warped_tray_image(
         no_peak_placement=no_peak_placement,
     )
     out_dir = Path(out_dir)
-    debug_dir = out_dir / "debug"
-    crops_dir = out_dir / "cell_crops" / prefix
-
-    debug_arg = debug_dir if options.save_debug else None
-    debug_prefix = prefix if options.save_debug else None
+    debug_dir, crops_dir, debug_arg, debug_prefix = _debug_paths(
+        out_dir=out_dir,
+        prefix=prefix,
+        save_debug=options.save_debug,
+    )
 
     corrected_warp = warped_bgr
     obliquity_angle_deg = 0.0
@@ -213,9 +227,7 @@ def process_warped_tray_path(
     obliquity_passes: int = 2,
     no_peak_placement: str = "predicted",
 ) -> WarpedTrayProcessingResult:
-    """
-    Load a rectified tray image from disk and process it.
-    """
+    """Load one rectified tray image from disk and process it."""
     image_path = Path(image_path)
     warped_bgr = cv2.imread(str(image_path))
 
@@ -257,9 +269,7 @@ def process_warped_tray_directory(
     obliquity_passes: int = 2,
     no_peak_placement: str = "predicted",
 ) -> list[WarpedTrayProcessingResult]:
-    """
-    Process all rectified tray images in a directory.
-    """
+    """Process all rectified tray images in a directory."""
     input_path = Path(input_dir)
     if not input_path.exists():
         raise FileNotFoundError(f"Input directory does not exist: {input_path}")
@@ -291,7 +301,3 @@ def process_warped_tray_directory(
         )
 
     return results
-
-
-def result_to_dict(result: WarpedTrayProcessingResult) -> dict:
-    return asdict(result)

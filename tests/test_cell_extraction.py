@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+"""Focused tests for the rectified-tray CV extraction pipeline."""
+
+from dataclasses import asdict
 import inspect
 from pathlib import Path
 
@@ -17,7 +20,6 @@ from src.cell_extraction.process_warped_tray import (
     process_warped_tray_directory,
     process_warped_tray_image,
     process_warped_tray_path,
-    result_to_dict,
 )
 
 
@@ -28,10 +30,7 @@ def make_synthetic_grid_image(
     cell_w: int = 50,
     line_thickness: int = 4,
 ) -> np.ndarray:
-    """
-    Create a simple synthetic top-down tray image with visible grid lines.
-    This is useful for smoke-testing the crop logic without model dependencies.
-    """
+    """Create a simple synthetic tray image with visible row and column separators."""
     height = rows * cell_h + (rows + 1) * line_thickness
     width = cols * cell_w + (cols + 1) * line_thickness
 
@@ -144,6 +143,7 @@ def test_process_warped_tray_image_runs_on_synthetic_grid(tmp_path: Path) -> Non
 
 
 def test_result_to_dict_is_serializable(tmp_path: Path) -> None:
+    """Warped-tray results should remain dataclass-serializable for artifact writing."""
     img = make_synthetic_grid_image(rows=3, cols=3)
 
     result = process_warped_tray_image(
@@ -153,7 +153,7 @@ def test_result_to_dict_is_serializable(tmp_path: Path) -> None:
         save_debug=False,
     )
 
-    payload = result_to_dict(result)
+    payload = asdict(result)
 
     assert isinstance(payload, dict)
     assert "rows" in payload

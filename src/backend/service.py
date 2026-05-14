@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""High-level service wrapper for the backend tray-analysis pipeline."""
+
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -17,6 +19,7 @@ from src.utils.visualization import render_validity_overlay
 
 @dataclass(frozen=True)
 class TrayAnalysisServiceConfig:
+    """Runtime configuration for the local tray-analysis service."""
     output_dir: Path = Path("outputs/mobile_backend")
     yolo_weights: Path = Path("models/tray_segmentation/trayseg_v18_1024.pt")
     tray_checkpoint: Path = Path("models/tray_classifier/best_traytype_net.pth")
@@ -25,16 +28,20 @@ class TrayAnalysisServiceConfig:
     rectified_width: int = 1400
     save_debug: bool = False
     apply_obliquity_correction: bool = False
+    overlay_style: str = "premium"
 
 
 @dataclass(frozen=True)
 class TrayAnalysisArtifacts:
+    """Paths to persisted artifacts produced by one analysis run."""
     annotated_path: Path | None
     rectified_path: Path | None
     result_json_path: Path
 
 
 class TrayAnalysisService:
+    """Owns model loading, pipeline execution, validation, and artifact writing."""
+
     NO_TRAY_MESSAGE = "No tray was found in this image. Please retake the photo with the full tray clearly visible."
     MIN_VALID_TOTAL_CELLS = 6
 
@@ -53,6 +60,7 @@ class TrayAnalysisService:
         )
 
     def analyze_image(self, image_path: str | Path) -> dict:
+        """Run the full backend analysis flow for one source image."""
         image_path = Path(image_path)
         self._validate_source_image(image_path)
         analysis_id = f"{image_path.stem}_{uuid4().hex[:8]}"
@@ -90,6 +98,7 @@ class TrayAnalysisService:
         )
 
     def _attach_validity_predictions(self, result: PipelineResult) -> None:
+        """Run per-cell validity inference and attach tray-level summary statistics."""
         if result.crop_paths:
             cell_predictions = predict_validity_for_tray(
                 crop_paths=result.crop_paths,
@@ -103,6 +112,7 @@ class TrayAnalysisService:
         result.tray_stats = summarize_tray_validity(cell_predictions)
 
     def _validate_analysis_result(self, result: PipelineResult) -> None:
+        """Reject outputs that are not credible enough to return to the app."""
         total_cells = 0 if result.tray_stats is None else int(result.tray_stats.get("total_cells", 0))
         if not result.cell_predictions or total_cells < self.MIN_VALID_TOTAL_CELLS:
             raise ValueError(self.NO_TRAY_MESSAGE)
@@ -167,8 +177,9 @@ class TrayAnalysisService:
             cols=int(result.cols),
             grid_x=grid_x,
             grid_y=grid_y,
+            style=self.config.overlay_style,
         )
-        annotated_path = annotated_dir / f"{Path(result.image_path).stem}.annotated.jpg"
+        annotated_path = annotated_dir / f"{Path(result.image_path).stem}.annotated.png"
         cv2.imwrite(str(annotated_path), annotated_bgr)
         return annotated_path
 
@@ -188,6 +199,7 @@ class TrayAnalysisService:
         result: PipelineResult,
         artifacts: TrayAnalysisArtifacts,
     ) -> dict:
+        """Convert pipeline results into the API response contract."""
         tray_stats = result.tray_stats or {}
         cell_predictions = result.cell_predictions or []
         return {
@@ -216,6 +228,7 @@ class TrayAnalysisService:
         }
 
     def _validate_source_image(self, image_path: Path) -> None:
+        """Reject obviously unusable captures before running the full pipeline."""
         image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
         if image is None or image.size == 0:
             raise ValueError(self.NO_TRAY_MESSAGE)

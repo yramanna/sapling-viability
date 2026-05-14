@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Batch driver for the backend pipeline with optional layout-accuracy scoring."""
+
 import argparse
 import csv
 import json
@@ -14,6 +16,38 @@ from src.backend.service import TrayAnalysisService, TrayAnalysisServiceConfig
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 BACKEND_DEFAULTS = TrayAnalysisServiceConfig()
+
+
+def build_service_config(args: argparse.Namespace, output_dir: Path) -> TrayAnalysisServiceConfig:
+    """Translate CLI arguments into backend service configuration."""
+    return TrayAnalysisServiceConfig(
+        output_dir=output_dir,
+        yolo_weights=Path(args.yolo_weights),
+        tray_checkpoint=Path(args.tray_checkpoint),
+        validity_checkpoint=Path(args.validity_checkpoint),
+        tray_type_threshold=args.tray_type_threshold,
+        rectified_width=args.rectified_width,
+        save_debug=args.save_debug,
+        apply_obliquity_correction=args.obliquity_correction,
+    )
+
+
+def build_backend_error_row(image_name: str, reason: str) -> dict[str, object]:
+    """Return a consistent result row for backend failures."""
+    return {
+        "image": image_name,
+        "pred_rows": None,
+        "pred_cols": None,
+        "annotated_image_path": None,
+        "rectified_image_path": None,
+        "result_json_path": None,
+        "tray_type_key": "",
+        "tray_type_confidence": None,
+        "route": None,
+        "method": "backend_error",
+        "reason": reason,
+        "crop_count": 0,
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -92,6 +126,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_truth_map(truth_csv: str | None) -> dict[str, dict[str, int]]:
+    """Load optional per-image ground-truth tray dimensions from CSV."""
     if not truth_csv:
         return {}
 
@@ -114,6 +149,7 @@ def load_truth_map(truth_csv: str | None) -> dict[str, dict[str, int]]:
 
 
 def collect_image_paths(input_dir: Path, pattern: str | None, limit: int | None) -> list[Path]:
+    """Collect input images from a directory using an optional glob filter."""
     if pattern:
         paths = sorted(path for path in input_dir.glob(pattern) if path.is_file())
     else:
@@ -129,6 +165,7 @@ def build_result_row(
     response: dict[str, object],
     truth: dict[str, int] | None,
 ) -> dict[str, object]:
+    """Flatten one backend response into a CSV-friendly row."""
     tray = dict(response.get("tray", {}))
     tray_stats = dict(response.get("tray_stats", {}))
     artifacts = dict(response.get("artifacts", {}))
@@ -163,6 +200,7 @@ def build_result_row(
 
 
 def summarize_rows(rows: list[dict[str, object]], truth_map: dict[str, dict[str, int]]) -> dict[str, object]:
+    """Aggregate batch-level metrics across all processed images."""
     summary: dict[str, object] = {
         "images_processed": len(rows),
         "rectification_failed": sum(1 for row in rows if row["method"] == "rectification_failed"),
@@ -197,6 +235,7 @@ def summarize_rows(rows: list[dict[str, object]], truth_map: dict[str, dict[str,
 
 
 def write_csv(rows: list[dict[str, object]], path: Path) -> None:
+    """Write heterogeneous result rows to CSV using unioned fieldnames."""
     if not rows:
         return
 
@@ -210,7 +249,10 @@ def write_csv(rows: list[dict[str, object]], path: Path) -> None:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
 def main() -> None:
+    """Run the evaluator against a directory of tray images."""
     args = parse_args()
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
@@ -224,18 +266,7 @@ def main() -> None:
     if not image_paths:
         raise FileNotFoundError(f"No images found in {input_dir}")
 
-    service = TrayAnalysisService(
-        TrayAnalysisServiceConfig(
-            output_dir=output_dir,
-            yolo_weights=Path(args.yolo_weights),
-            tray_checkpoint=Path(args.tray_checkpoint),
-            validity_checkpoint=Path(args.validity_checkpoint),
-            tray_type_threshold=args.tray_type_threshold,
-            rectified_width=args.rectified_width,
-            save_debug=args.save_debug,
-            apply_obliquity_correction=args.obliquity_correction,
-        )
-    )
+    service = TrayAnalysisService(build_service_config(args, output_dir))
     rows: list[dict[str, object]] = []
 
     for image_path in image_paths:
@@ -243,22 +274,7 @@ def main() -> None:
         try:
             response = service.analyze_image(image_path)
         except Exception as exc:
-            rows.append(
-                {
-                    "image": image_path.name,
-                    "pred_rows": None,
-                    "pred_cols": None,
-                    "annotated_image_path": None,
-                    "rectified_image_path": None,
-                    "result_json_path": None,
-                    "tray_type_key": "",
-                    "tray_type_confidence": None,
-                    "route": None,
-                    "method": "backend_error",
-                    "reason": str(exc),
-                    "crop_count": 0,
-                }
-            )
+            rows.append(build_backend_error_row(image_path.name, str(exc)))
             continue
 
         if args.no_annotated_output:

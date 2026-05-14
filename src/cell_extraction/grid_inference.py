@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Infer tray lattice geometry from separator evidence in rectified tray images."""
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +18,7 @@ from src.cell_extraction.separator_mask import (
 
 @dataclass
 class GridInferenceResult:
+    """Grid geometry, debug artifacts, and method metadata for one tray image."""
     rows: int | None
     cols: int | None
     grid_x: list[int]
@@ -50,6 +53,80 @@ def estimate_period_autocorr(sig: np.ndarray, lag_min: int, lag_max: int) -> flo
         return None
 
     return float(lag_min + best_idx)
+
+
+def _save_separator_debug_images(
+    debug_dir: str | Path | None,
+    debug_prefix: str | None,
+    *,
+    preclosed: np.ndarray,
+    lines: np.ndarray,
+    horiz: np.ndarray,
+    vert: np.ndarray,
+) -> None:
+    """Persist the separator-mask intermediate images used during grid inference."""
+    if debug_dir is None or not debug_prefix:
+        return
+
+    debug_path = Path(debug_dir)
+    debug_path.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_preclosed.jpg"), preclosed)
+    cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_longlines.jpg"), lines)
+    cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_horiz.jpg"), horiz)
+    cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_vert.jpg"), vert)
+
+
+def _prepare_separator_longlines(lines: np.ndarray) -> np.ndarray:
+    """Binarize and lightly dilate separator longlines for downstream inference."""
+    lines_u8 = (lines > 127).astype(np.uint8) * 255
+    return cv2.dilate(
+        lines_u8,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+        iterations=1,
+    )
+
+
+def _add_inference_borders(lines_u8: np.ndarray, border_thickness: int = 4) -> np.ndarray:
+    """Inject tray-border lines so projection statistics remain bounded."""
+    bordered = lines_u8.copy()
+    bordered[:border_thickness, :] = 255
+    bordered[-border_thickness:, :] = 255
+    bordered[:, :border_thickness] = 255
+    bordered[:, -border_thickness:] = 255
+    return bordered
+
+
+def _projection_profiles(roi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Compute 1-D projection profiles for vertical and horizontal separator evidence."""
+    proj_x = (roi > 0).sum(axis=0).astype(np.float32)
+    proj_y = (roi > 0).sum(axis=1).astype(np.float32)
+    return proj_x, proj_y
+
+
+def _save_completed_lattice_debug(
+    debug_dir: str | Path | None,
+    debug_prefix: str | None,
+    *,
+    warped_bgr: np.ndarray,
+    lines_u8: np.ndarray,
+    lattice_full: np.ndarray,
+    completed_full: np.ndarray,
+    overlay: np.ndarray,
+) -> None:
+    """Persist the final lattice and completed-mask debug views."""
+    if debug_dir is None or not debug_prefix:
+        return
+
+    debug_path = Path(debug_dir)
+    debug_path.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_longlines_raw_dilated.jpg"), lines_u8)
+    cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_lattice_raw.jpg"), lattice_full)
+    cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_completed_mask_raw.jpg"), completed_full)
+
+    completed_overlay = warped_bgr.copy()
+    completed_overlay[completed_full > 0] = (255, 255, 255)
+    cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_completed_overlay_raw.jpg"), completed_overlay)
+    cv2.imwrite(str(debug_path / f"{debug_prefix}_grid_overlay_sep.jpg"), overlay)
 
 
 def _generate_positions(
@@ -136,40 +213,24 @@ def infer_grid_from_separators(
     if max_period_px is None:
         max_period_px = int(max(30, min(width, height) * 0.45))
 
-    tray_mask = separator_mask_graytray_refined(
-        warped_bgr,
-        debug_dir=debug_dir,
-        debug_prefix=debug_prefix,
-    )
+    tray_mask = separator_mask_graytray_refined(warped_bgr, debug_dir=debug_dir, debug_prefix=debug_prefix)
     lines, horiz, vert, preclosed = extract_separator_longlines(tray_mask)
-
-    if debug_dir is not None and debug_prefix:
-        debug_path = Path(debug_dir)
-        debug_path.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_preclosed.jpg"), preclosed)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_longlines.jpg"), lines)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_horiz.jpg"), horiz)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_vert.jpg"), vert)
-
-    lines_u8 = (lines > 127).astype(np.uint8) * 255
-    lines_u8 = cv2.dilate(
-        lines_u8,
-        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
-        iterations=1,
+    _save_separator_debug_images(
+        debug_dir,
+        debug_prefix,
+        preclosed=preclosed,
+        lines=lines,
+        horiz=horiz,
+        vert=vert,
     )
 
-    lines_infer = lines_u8.copy()
-    border_th = 4
-    lines_infer[:border_th, :] = 255
-    lines_infer[-border_th:, :] = 255
-    lines_infer[:, :border_th] = 255
-    lines_infer[:, -border_th:] = 255
+    lines_u8 = _prepare_separator_longlines(lines)
+    lines_infer = _add_inference_borders(lines_u8)
 
     roi = lines_infer[y0:y1, x0:x1]
     roi_h, roi_w = roi.shape[:2]
 
-    proj_x = (roi > 0).sum(axis=0).astype(np.float32)
-    proj_y = (roi > 0).sum(axis=1).astype(np.float32)
+    proj_x, proj_y = _projection_profiles(roi)
 
     sx = smooth_1d(proj_x, k=max(31, roi_w // 40))
     sy = smooth_1d(proj_y, k=max(31, roi_h // 80))
@@ -259,17 +320,15 @@ def infer_grid_from_separators(
 
     reason = "ok" if (rows is not None and cols is not None) else "insufficient_periodicity"
 
-    if debug_dir is not None and debug_prefix:
-        debug_path = Path(debug_dir)
-        debug_path.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_longlines_raw_dilated.jpg"), lines_u8)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_lattice_raw.jpg"), lattice_full)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_completed_mask_raw.jpg"), completed_full)
-
-        completed_overlay = warped_bgr.copy()
-        completed_overlay[completed_full > 0] = (255, 255, 255)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_completed_overlay_raw.jpg"), completed_overlay)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_grid_overlay_sep.jpg"), overlay)
+    _save_completed_lattice_debug(
+        debug_dir,
+        debug_prefix,
+        warped_bgr=warped_bgr,
+        lines_u8=lines_u8,
+        lattice_full=lattice_full,
+        completed_full=completed_full,
+        overlay=overlay,
+    )
 
     return GridInferenceResult(
         rows=None if rows is None else int(rows),
@@ -300,40 +359,24 @@ def infer_grid_from_separators_with_known_layout(
     if rows <= 0 or cols <= 0:
         raise ValueError("rows and cols must be positive for constrained grid placement")
 
-    tray_mask = separator_mask_graytray_refined(
-        warped_bgr,
-        debug_dir=debug_dir,
-        debug_prefix=debug_prefix,
-    )
+    tray_mask = separator_mask_graytray_refined(warped_bgr, debug_dir=debug_dir, debug_prefix=debug_prefix)
     lines, horiz, vert, preclosed = extract_separator_longlines(tray_mask)
-
-    if debug_dir is not None and debug_prefix:
-        debug_path = Path(debug_dir)
-        debug_path.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_preclosed.jpg"), preclosed)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_longlines.jpg"), lines)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_horiz.jpg"), horiz)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_vert.jpg"), vert)
-
-    lines_u8 = (lines > 127).astype(np.uint8) * 255
-    lines_u8 = cv2.dilate(
-        lines_u8,
-        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
-        iterations=1,
+    _save_separator_debug_images(
+        debug_dir,
+        debug_prefix,
+        preclosed=preclosed,
+        lines=lines,
+        horiz=horiz,
+        vert=vert,
     )
 
-    lines_infer = lines_u8.copy()
-    border_th = 4
-    lines_infer[:border_th, :] = 255
-    lines_infer[-border_th:, :] = 255
-    lines_infer[:, :border_th] = 255
-    lines_infer[:, -border_th:] = 255
+    lines_u8 = _prepare_separator_longlines(lines)
+    lines_infer = _add_inference_borders(lines_u8)
 
     roi = lines_infer
     roi_h, roi_w = roi.shape[:2]
 
-    proj_x = (roi > 0).sum(axis=0).astype(np.float32)
-    proj_y = (roi > 0).sum(axis=1).astype(np.float32)
+    proj_x, proj_y = _projection_profiles(roi)
 
     sx = smooth_1d(proj_x, k=max(31, roi_w // 40))
     sy = smooth_1d(proj_y, k=max(31, roi_h // 80))
@@ -413,16 +456,15 @@ def infer_grid_from_separators_with_known_layout(
     for y in grid_y:
         cv2.line(overlay, (0, int(y)), (width - 1, int(y)), (0, 0, 255), 2)
 
-    if debug_dir is not None and debug_prefix:
-        debug_path = Path(debug_dir)
-        debug_path.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_longlines_raw_dilated.jpg"), lines_u8)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_lattice_raw.jpg"), lattice_full)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_completed_mask_raw.jpg"), completed_full)
-        completed_overlay = warped_bgr.copy()
-        completed_overlay[completed_full > 0] = (255, 255, 255)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_sep_completed_overlay_raw.jpg"), completed_overlay)
-        cv2.imwrite(str(debug_path / f"{debug_prefix}_grid_overlay_sep.jpg"), overlay)
+    _save_completed_lattice_debug(
+        debug_dir,
+        debug_prefix,
+        warped_bgr=warped_bgr,
+        lines_u8=lines_u8,
+        lattice_full=lattice_full,
+        completed_full=completed_full,
+        overlay=overlay,
+    )
 
     return GridInferenceResult(
         rows=int(rows),
@@ -448,7 +490,7 @@ def crop_cells_from_grid(
     min_size: int = 8,
     prefix: str = "cell",
 ) -> list[tuple[int, int, str]]:
-    """Crop each cell defined by consecutive vertical/horizontal grid lines."""
+    """Crop each cell defined by consecutive vertical and horizontal grid lines."""
     height, width = img_bgr.shape[:2]
 
     xs = sorted({int(round(x)) for x in grid_x if x is not None})

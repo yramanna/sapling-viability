@@ -123,21 +123,3 @@ def summarize_tray_validity(predictions: Sequence[CellValidityPrediction]) -> di
         "mean_occupied_confidence": mean_occupied_confidence,
         "mean_empty_confidence": mean_empty_confidence,
     }
-
-
-def predict_tray_validity_stats(
-    crop_paths: Sequence[str | Path],
-    model_path: str | Path,
-    device: str | torch.device | None = None,
-    class_names: Sequence[str] = DEFAULT_VALIDITY_CLASS_NAMES,
-) -> tuple[list[CellValidityPrediction], dict[str, float | int]]:
-    """Convenience wrapper: load checkpoint, predict all cells, return tray stats."""
-    model, resolved_device = load_validity_model(model_path=model_path, device=device)
-    predictions = predict_validity_for_tray(
-        crop_paths=crop_paths,
-        model=model,
-        device=resolved_device,
-        class_names=class_names,
-    )
-    stats = summarize_tray_validity(predictions)
-    return predictions, stats

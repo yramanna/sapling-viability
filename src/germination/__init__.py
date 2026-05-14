@@ -1,7 +1,6 @@
 from src.germination.predict import (
     CellValidityPrediction,
     load_validity_model,
-    predict_tray_validity_stats,
     predict_validity_for_crop,
     predict_validity_for_tray,
     summarize_tray_validity,
@@ -15,5 +14,4 @@ __all__ = [
     "predict_validity_for_crop",
     "predict_validity_for_tray",
     "summarize_tray_validity",
-    "predict_tray_validity_stats",
 ]

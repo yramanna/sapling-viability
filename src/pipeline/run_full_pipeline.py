@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""End-to-end tray pipeline orchestration from rectification through cell crops."""
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +24,7 @@ from src.tray_layout.routing import RoutingDecision, choose_layout_route
 
 @dataclass
 class PipelineResult:
+    """Serializable result bundle returned by the end-to-end tray pipeline."""
     image_path: str
     warped_bgr: np.ndarray | None
     tray_type_key: tuple[int, int, int, int] | None
@@ -41,6 +44,7 @@ class PipelineResult:
 
 @dataclass(frozen=True)
 class LoadedTrayTypeModel:
+    """Preloaded tray-type classifier and its index-to-layout mapping."""
     model: object
     idx_to_key: list[tuple[int, int, int, int]]
     device: str | torch.device = "cpu"
@@ -55,6 +59,7 @@ def crop_cells_from_tray_type(
     crop_pad: int = 0,
     crop_min_size: int = 8,
 ) -> list[str]:
+    """Crop cells from a tray using precomputed grid lines."""
     saved = crop_cells_from_grid(
         warped_bgr,
         grid_x=grid_x,
@@ -86,6 +91,7 @@ def run_full_pipeline(
     save_debug: bool = False,
     apply_obliquity_correction: bool = False,
 ) -> PipelineResult:
+    """Run tray rectification, layout routing, grid placement, and cell extraction."""
     image_path = str(image) if isinstance(image, (str, Path)) else ""
     if prefix is None:
         prefix = Path(image_path).stem if image_path else "tray"

@@ -13,7 +13,6 @@ from src.cell_extraction.process_warped_tray import (
     process_warped_tray_directory,
     process_warped_tray_image,
     process_warped_tray_path,
-    result_to_dict,
 )
 from src.cell_extraction.separator_mask import (
     extract_separator_longlines,
@@ -35,7 +34,6 @@ __all__ = [
     "process_warped_tray_directory",
     "process_warped_tray_image",
     "process_warped_tray_path",
-    "result_to_dict",
     "extract_separator_longlines",
     "separator_mask_graytray_refined",
     "smooth_1d",

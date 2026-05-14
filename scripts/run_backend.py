@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""CLI entrypoint for running the local FastAPI backend."""
+
 import argparse
 import sys
 from pathlib import Path
@@ -12,6 +14,7 @@ if str(ROOT) not in sys.path:
 
 
 def main() -> None:
+    """Parse command-line flags and launch the backend server."""
     parser = argparse.ArgumentParser(description="Run the Bloomlogic local backend API.")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind. Default: 0.0.0.0")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind. Default: 8000")

@@ -1,4 +1,5 @@
 import PhotosUI
+import Photos
 import SwiftUI
 import UIKit
 
@@ -597,6 +598,9 @@ private struct SingleTrayEntryView: View {
     let onUploadedImage: (UIImage) -> Void
     let onCapture: () -> Void
 
+    @State private var isShowingPhotoPicker = false
+    @State private var showPhotoAccessAlert = false
+
     var body: some View {
         AnchoredActionScreen(
             background: {
@@ -647,8 +651,9 @@ private struct SingleTrayEntryView: View {
                     }
                     .buttonStyle(PrimaryButtonStyle())
 
-                    PhotosPicker("Upload Image", selection: $selectedPhotoItem, matching: .images)
-                        .id(uploadPickerID)
+                    Button("Upload Image") {
+                        requestPhotoLibraryAccess()
+                    }
                         .buttonStyle(PrimaryButtonStyle())
                 }
                 .padding(.horizontal, 18)
@@ -676,6 +681,17 @@ private struct SingleTrayEntryView: View {
             actionTopRatio: ActionAnchorMetrics.cardTopRatio,
             footerBottomPadding: 0
         )
+        .id(uploadPickerID)
+        .photosPicker(isPresented: $isShowingPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+        .alert("Photo access needed", isPresented: $showPhotoAccessAlert) {
+            Button("Open Settings") {
+                guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(settingsURL)
+            }
+            Button("Not Now", role: .cancel) {}
+        } message: {
+            Text("Allow full photo library access in Settings so you can upload any tray image from your device.")
+        }
         .task(id: selectedPhotoItem) {
             guard let selectedPhotoItem else { return }
             if let data = try? await selectedPhotoItem.loadTransferable(type: Data.self),
@@ -683,6 +699,37 @@ private struct SingleTrayEntryView: View {
                 onUploadedImage(image)
             }
             self.selectedPhotoItem = nil
+        }
+    }
+
+    private func requestPhotoLibraryAccess() {
+        let currentStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        switch currentStatus {
+        case .authorized:
+            isShowingPhotoPicker = true
+        case .notDetermined:
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+                DispatchQueue.main.async {
+                    handlePhotoLibraryAuthorization(status)
+                }
+            }
+        case .limited, .denied, .restricted:
+            showPhotoAccessAlert = true
+        @unknown default:
+            showPhotoAccessAlert = true
+        }
+    }
+
+    private func handlePhotoLibraryAuthorization(_ status: PHAuthorizationStatus) {
+        switch status {
+        case .authorized:
+            isShowingPhotoPicker = true
+        case .limited, .denied, .restricted:
+            showPhotoAccessAlert = true
+        case .notDetermined:
+            break
+        @unknown default:
+            showPhotoAccessAlert = true
         }
     }
 }

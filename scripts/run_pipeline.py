@@ -1,4 +1,8 @@
+"""Placeholder script documenting the intended end-to-end pipeline stages."""
+
+
 def main() -> None:
+    """Print the conceptual pipeline stages used by the project."""
     print("Run end-to-end pipeline here.")
     print("Stages:")
     print("1. Tray segmentation")

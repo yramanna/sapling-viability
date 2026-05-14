@@ -121,20 +121,3 @@ def predict_tray_type(
         confidence=float(probs[idx]),
         probabilities=probs,
     )
-
-
-@torch.no_grad()
-def predict_tray_type_from_checkpoint(
-    rectified_bgr: np.ndarray,
-    checkpoint_path: str | Path,
-    input_size: tuple[int, int] = (384, 640),
-    device: str | torch.device = "cpu",
-) -> TrayTypePrediction:
-    model, idx_to_key, _ = load_tray_type_checkpoint(checkpoint_path, device=device)
-    return predict_tray_type(
-        model=model,
-        idx_to_key=idx_to_key,
-        rectified_bgr=rectified_bgr,
-        input_size=input_size,
-        device=device,
-    )

@@ -5,7 +5,7 @@ import UIKit
 enum AppSettings {
     static let appName = "Greenhouse Helper"
     static let poweredBy = "Powered by bloomlogic"
-    static let backendBaseURL = URL(string: "http://10.0.0.196:8000")!
+    static let backendBaseURL = URL(string: "http://127.0.0.1:8000")!
 }
 
 enum AppPalette {
