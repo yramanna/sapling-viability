@@ -705,7 +705,7 @@ private struct SingleTrayEntryView: View {
     private func requestPhotoLibraryAccess() {
         let currentStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         switch currentStatus {
-        case .authorized:
+        case .authorized, .limited:
             isShowingPhotoPicker = true
         case .notDetermined:
             PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
@@ -722,9 +722,9 @@ private struct SingleTrayEntryView: View {
 
     private func handlePhotoLibraryAuthorization(_ status: PHAuthorizationStatus) {
         switch status {
-        case .authorized:
+        case .authorized, .limited:
             isShowingPhotoPicker = true
-        case .limited, .denied, .restricted:
+        case .denied, .restricted:
             showPhotoAccessAlert = true
         case .notDetermined:
             break
